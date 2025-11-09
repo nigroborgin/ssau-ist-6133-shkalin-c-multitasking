@@ -7,4 +7,4 @@
 cmake-build-*/
 
 # Compiled files
-.out/*
+out/*

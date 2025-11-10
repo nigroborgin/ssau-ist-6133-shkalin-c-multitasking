@@ -2,9 +2,10 @@
 
 SRC_DIR="./src/2_threads"
 OUT_DIR="./out/2_threads"
+FILE_NAME_1="main"
 
 mkdir -p "$OUT_DIR"
 
-cc "$SRC_DIR/main.c" -o "$OUT_DIR/main"
+cc "$SRC_DIR/$FILE_NAME_1.c" -o "$OUT_DIR/$FILE_NAME_1"
 
-"$OUT_DIR/main"
+"$OUT_DIR/$FILE_NAME_1"

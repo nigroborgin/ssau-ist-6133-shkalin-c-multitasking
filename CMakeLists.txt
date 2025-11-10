@@ -7,5 +7,5 @@ include_directories(include)
 add_executable(multitasking
         src/1_processes/main.c
         src/1_processes/hello.c
-        src/2_threads/main.c
+        src/2_threads/system_v_threads.c
 )

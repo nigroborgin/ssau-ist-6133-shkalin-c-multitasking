@@ -8,4 +8,6 @@ add_executable(multitasking
         src/1_processes/main.c
         src/1_processes/hello.c
         src/2_threads/system_v_threads.c
+        src/2_threads/posix_threads_1.c
+        src/2_threads/posix_threads_2.c
 )

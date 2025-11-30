@@ -3,7 +3,7 @@
 #include <wait.h>
 
 pid_t p, q;
-char *e[]={"",""};
+char* e[]={"./out/1_processes/hello", NULL};
 
 int main() {
 

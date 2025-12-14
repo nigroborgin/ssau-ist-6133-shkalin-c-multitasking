@@ -8,6 +8,8 @@ add_executable(multitasking
         src/lab_01/main.c
         include/lab_01/arithmetic_processes.h
         src/lab_01/arithmetic_processes.c
+        include/lab_01/task_statuses.h
+        include/lab_01/file_paths.h
 )
 
 add_executable(1_processes

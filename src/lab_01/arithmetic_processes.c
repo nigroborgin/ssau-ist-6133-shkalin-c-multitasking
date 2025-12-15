@@ -1,98 +1,97 @@
-#include "lab_01/arithmetic_processes.h"
-#include "lab_01/file_paths.h"
-#include "lab_01/task_statuses.h"
-
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <stdbool.h>
 
-extern pthread_mutex_t *plus_mutex;
+#include "lab_01/arithmetic_processes.h"
+#include "lab_01/file_paths.h"
+#include "lab_01/task_statuses.h"
 
-void plus_process(void)
+
+typedef double (*math_op_t)(double a, double b);
+
+extern pthread_mutex_t *plus_mutex;
+extern pthread_mutex_t *minus_mutex;
+extern pthread_mutex_t *mul_mutex;
+extern pthread_mutex_t *div_mutex;
+extern pthread_mutex_t *sqrt_mutex;
+
+double op_plus(double a, double b){ return a + b; }
+double op_minus(double a, double b) { return a - b; }
+double op_mul(double a, double b) { return a * b; }
+double op_div(double a, double b) { return (b != 0) ? a / b : 0; } // Защита от деления на 0
+double op_sqrt(double a, double b) { return (a >= 0) ? sqrt(a) : 0; } // b игнорируем
+
+void generic_process(const char *process_name, const char *filename, pthread_mutex_t *mutex, math_op_t operation)
 {
-    printf("[PLUS %d] started\n", getpid());
+    printf("[%s %d] started\n", process_name, getpid());
+
     while (1) {
         bool has_job = false;
-        double a = 0.0, b = 0.0;
+        double num1 = 0.0, num2 = 0.0;
 
         // БЛОКИРУЕМ МЬЮТЕКС для чтения файла
-        pthread_mutex_lock(plus_mutex);
-
-        FILE *f = fopen(PLUS_FILE, "r");
-        if (f) {
+        pthread_mutex_lock(mutex);
+        FILE *file = fopen(filename, "r");
+        if (file) {
             double res_unused;
             int status_int;
-            if (fscanf(f, "%d %lf %lf %lf", &status_int, &a, &b, &res_unused) == 4) {
-                const TaskStatus status = (TaskStatus) status_int;
-                if (status == STATUS_READY) {
+            if (fscanf(file, "%d %lf %lf %lf", &status_int, &num1, &num2, &res_unused) == 4) {
+                if ((TaskStatus)status_int == STATUS_READY) {
                     has_job = true;
-                    printf("[PLUS %d] got task: a=%.2lf, b=%.2lf\n", getpid(), a, b);
+                    printf("[%s %d] got task: num1=%.2lf, num2=%.2lf\n", process_name, getpid(), num1, num2);
                 }
             }
-            fclose(f);
+            fclose(file);
         } else {
             if (errno != ENOENT) {
-                perror("[PLUS] fopen read");
+                perror("fopen read");
             }
         }
 
         // РАЗБЛОКИРУЕМ МЬЮТЕКС для старта вычислений или ожидания задания
-        pthread_mutex_unlock(plus_mutex);
+        pthread_mutex_unlock(mutex);
 
         if (has_job) {
-            const double res = a + b;
+            const double res = operation(num1, num2);
 
             // БЛОКИРУЕМ МЬЮТЕКС для записи в файл
-            pthread_mutex_lock(plus_mutex);
-
-            FILE *f_out = fopen(PLUS_FILE, "w");
-            if (f_out) {
-                const TaskStatus status = STATUS_DONE;
-                fprintf(f_out, "%d %.17g %.17g %.17g\n", status, a, b, res);
-                fclose(f_out);
-                printf("[PLUS %d] result ready: %.2f\n", getpid(), res);
+            pthread_mutex_lock(mutex);
+            FILE *file_out = fopen(filename, "w");
+            if (file_out) {
+                fprintf(file_out, "%d %.17g %.17g %.17g\n", STATUS_DONE, num1, num2, res);
+                fclose(file_out);
+                printf("[%s %d] result ready: %.2f\n", process_name, getpid(), res);
             } else {
-                perror("[PLUS] fopen write");
+                perror("fopen write");
             }
-            // РАЗБЛОКИРУЕМ МЬЮТЕКС для того чтобы забрали результаты вычислений
-            pthread_mutex_unlock(plus_mutex);
 
+            // РАЗБЛОКИРУЕМ МЬЮТЕКС для того чтобы забрали результаты вычислений
+            pthread_mutex_unlock(mutex);
         } else {
-            usleep(10 * 1000);  // 10 мс
+            usleep(10 * 1000); // 10 мс
         }
     }
 }
 
-void minus_process(void)
-{
-    printf("[MINUS %d] started\n", getpid());
-    while (1) {
-        usleep(1000 * 1000);
-    }
+void plus_process(void) {
+    generic_process("PLUS", PLUS_FILE, plus_mutex, op_plus);
 }
 
-void multiplier_process(void)
-{
-    printf("[MULTIPLIER %d] started\n", getpid());
-    while (1) {
-        usleep(1000 * 1000);
-    }
+void minus_process(void) {
+    generic_process("MINUS", MINUS_FILE, minus_mutex, op_minus);
 }
 
-void divider_process(void)
-{
-    printf("[DIVIDER %d] started\n", getpid());
-    while (1) {
-        usleep(1000 * 1000);
-    }
+void multiplier_process(void) {
+    generic_process("MULTIPLIER", MUL_FILE, mul_mutex, op_mul);
 }
 
-void sqrt_process(void)
-{
-    printf("[SQRT %d] started\n", getpid());
-    while (1) {
-        usleep(1000 * 1000);
-    }
+void divider_process(void) {
+    generic_process("DIVIDER", DIV_FILE, div_mutex, op_div);
+}
+
+void sqrt_process(void) {
+    generic_process("SQRT", SQRT_FILE, sqrt_mutex, op_sqrt);
 }

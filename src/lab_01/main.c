@@ -1,7 +1,5 @@
-#include "lab_01/arithmetic_processes.h"
-#include "lab_01/file_paths.h"
-#include "lab_01/task_statuses.h"
-
+#include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -9,6 +7,12 @@
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <stdbool.h>
+#include <string.h>
+
+#include "lab_01/arithmetic_processes.h"
+#include "lab_01/file_paths.h"
+#include "lab_01/task_statuses.h"
 
 
 pid_t plus_pid  = -1;
@@ -22,6 +26,9 @@ pthread_mutex_t *minus_mutex;
 pthread_mutex_t *mul_mutex;
 pthread_mutex_t *div_mutex;
 pthread_mutex_t *sqrt_mutex;
+
+const int TIMEOUT_PER_TASK = 5000; // подождать 5 мс
+const int MAX_ATTEMPTS_PER_TASK = 1000;// 10 секунд (2000 * 5мс)
 
 void init_shared_mutex(pthread_mutex_t **mutex_ptr)
 {
@@ -122,63 +129,178 @@ void complete_processes(void)
     waitpid(sqrt_pid, NULL, 0);
 }
 
-int main(void)
+void init(void)
 {
     init_mutexes();
     create_processes();
+}
 
-    // double a1, b1, c1;
-    // printf("КВАДРАТНОЕ УРАВНЕНИЕ\n"
-    //        "Введите коэффициенты a, b, c (или Ctrl+D для выхода): ");
-    // scanf("%lf %lf %lf", &a1, &b1, &c1);
+void cleanup(void)
+{
+    complete_processes();
+    cleanup_mutexes();
+}
 
+bool create_task(const char *filename, pthread_mutex_t *mutex, const double num1, const double num2)
+{
     // БЛОКИРУЕМ МЬЮТЕКС для записи задания
-    pthread_mutex_lock(plus_mutex);
+    pthread_mutex_lock(mutex);
 
-    FILE *file_task = fopen(PLUS_FILE, "w");
+    FILE *file_task = fopen(filename, "w");
     if (!file_task) {
-        perror("fopen PLUS_FILE");
-        pthread_mutex_unlock(plus_mutex);
-        complete_processes();
-        return 1;
+        fprintf(stderr, "Ошибка открытия файла %s: %s\n", filename, strerror(errno));
+        pthread_mutex_unlock(mutex);
+        return false;
     }
-    const double a = 10.5, b = 1.5, res = 0.0; // тестовые данные
-    fprintf(file_task, "%d %.17g %.17g %.17g\n", STATUS_READY, a, b, res);
+    fprintf(file_task, "%d %.17g %.17g %.17g\n", STATUS_READY, num1, num2, 0.0);
     fclose(file_task);
 
     // РАЗБЛОКИРУЕМ МЬЮТЕКС для передачи задания на выполнение
-    pthread_mutex_unlock(plus_mutex);
+    pthread_mutex_unlock(mutex);
+    return true;
+}
 
-    // Ждем результат
-    double result_plus;
-    while (1) {
+double get_task_result(const char *filename, pthread_mutex_t *mutex)
+{
+    double result = 0.0;
+
+    int attempts = 0;
+    while (attempts < MAX_ATTEMPTS_PER_TASK) {
         // БЛОКИРУЕМ МЬЮТЕКС для чтения файла
-        pthread_mutex_lock(plus_mutex);
-        FILE *file_res = fopen(PLUS_FILE, "r");
+        pthread_mutex_lock(mutex);
+        FILE *file_res = fopen(filename, "r");
 
         if (file_res) {
             int status_int;
-            double a_readed, b_readed;
-            if (fscanf(file_res, "%d %lf %lf %lf", &status_int, &a_readed, &b_readed, &result_plus) == 4) {
-                TaskStatus status = (TaskStatus)status_int;
-                if (status == STATUS_DONE) {
+            double num1_readed, num2_readed;
+            if (fscanf(file_res, "%d %lf %lf %lf", &status_int, &num1_readed, &num2_readed, &result) == 4) {
+                if ((TaskStatus)status_int == STATUS_DONE) {
                     fclose(file_res);
                     // РАЗБЛОКИРУЕМ МЬЮТЕКС т.к. файл прочитан
-                    pthread_mutex_unlock(plus_mutex);
+                    pthread_mutex_unlock(mutex);
                     // выходим из цикла, т.к. результат получен
-                    break;
+                    return result;
                 }
             }
             fclose(file_res);
+        } else {
+            if (errno != ENOENT) {
+                perror("fopen read");
+            }
         }
         // РАЗБЛОКИРУЕМ МЬЮТЕКС ждём результаты дальше
-        pthread_mutex_unlock(plus_mutex);
-        usleep(5000);  // подождать 5 мс
+        pthread_mutex_unlock(mutex);
+
+        attempts++;
+        usleep(TIMEOUT_PER_TASK); // подождать
     }
-    printf("result_plus: %.17g\n", result_plus);
+
+    fprintf(stderr, "Timeout: процесс не вернул результат\n");
+    return NAN;  // Возвращаем NaN при таймауте
+}
+
+int main(void)
+{
+    init();
+
+    double a, b, c;
+    usleep(1000);
+    printf("\nКВАДРАТНОЕ УРАВНЕНИЕ:\n"
+           "Введите коэффициенты a, b, c (или Ctrl+D для выхода): ");
+    scanf("%lf %lf %lf", &a, &b, &c);
+    printf("\n");
+    // a = 1; b = -5; c = 6;
+
+    // 1. Посчитать b^2 (через MUL_FILE)
+    if (!create_task(MUL_FILE, mul_mutex, b, b)) {
+        cleanup();
+        return 1;
+    }
+    const double b_squared = get_task_result(MUL_FILE, mul_mutex);
+
+    // 2.1. Посчитать 4*a (через MUL_FILE)
+    if (!create_task(MUL_FILE, mul_mutex, 4.0, a)) {
+        cleanup();
+        return 1;
+    }
+    const double a_4 = get_task_result(MUL_FILE, mul_mutex);
+
+    // 2.2. Посчитать 4*a*c (через MUL_FILE)
+    if (!create_task(MUL_FILE, mul_mutex, a_4, c)) {
+        cleanup();
+        return 1;
+    }
+    const double a_c_4 = get_task_result(MUL_FILE, mul_mutex);
+
+    // 3. Посчитать D = b^2 - 4ac (через MINUS_FILE)
+    if (!create_task(MINUS_FILE, minus_mutex, b_squared, a_c_4)) {
+        cleanup();
+        return 1;
+    }
+    const double d = get_task_result(MINUS_FILE, minus_mutex);
+
+    // 4. Если D < 0:
+    if (d < 0) {
+        printf("Результат: Нет действительных корней");
+        return 0;
+    }
+
+    // 5. Извлечь sqrt(D) (через SQRT_FILE)
+    if (!create_task(SQRT_FILE, sqrt_mutex, d, 0.0)) {
+        cleanup();
+        return 1;
+    }
+    const double sqrt_d = get_task_result(SQRT_FILE, sqrt_mutex);
+
+    // 6.
+    // 7. Посчитать x2 = (-b - sqrt(D)) / 2a
+
+    // -b
+    if (!create_task(MINUS_FILE, minus_mutex, 0, b)) {
+        cleanup();
+        return 1;
+    }
+    const double minus_b = get_task_result(MINUS_FILE, minus_mutex);
+
+    // 2a
+    if (!create_task(MUL_FILE, mul_mutex, a, 2)) {
+        cleanup();
+        return 1;
+    }
+    const double a_2 = get_task_result(MUL_FILE, mul_mutex);
+
+    // (-b + sqrt(D))
+    if (!create_task(PLUS_FILE, plus_mutex, minus_b, sqrt_d)) {
+        cleanup();
+        return 1;
+    }
+    const double minus_b_plus_sqrt_d = get_task_result(PLUS_FILE, plus_mutex);
+
+    // (-b - sqrt(D))
+    if (!create_task(MINUS_FILE, minus_mutex, minus_b, sqrt_d)) {
+        cleanup();
+        return 1;
+    }
+    const double minus_b_minus_sqrt_d = get_task_result(MINUS_FILE, minus_mutex);
+
+    // Посчитать x1 = (-b + sqrt(D)) / 2a
+    if (!create_task(DIV_FILE, div_mutex, minus_b_plus_sqrt_d, a_2)) {
+        cleanup();
+        return 1;
+    }
+    const double x1 = get_task_result(DIV_FILE, div_mutex);
+
+    // Посчитать x2 = (-b - sqrt(D)) / 2a
+    if (!create_task(DIV_FILE, div_mutex, minus_b_minus_sqrt_d, a_2)) {
+        cleanup();
+        return 1;
+    }
+    const double x2 = get_task_result(DIV_FILE, div_mutex);
+
+    // Результат
+    printf("\nРезультат: x1 = %.17g, x2 = %.17g\n", x1, x2);
 
 
-    complete_processes();
-    cleanup_mutexes();
+    cleanup();
     return 0;
 }

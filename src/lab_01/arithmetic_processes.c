@@ -8,6 +8,7 @@
 #include "lab_01/arithmetic_processes.h"
 #include "lab_01/file_paths.h"
 #include "lab_01/task_statuses.h"
+#include "lab_01/utils.h"
 
 
 typedef double (*math_op_t)(double a, double b);
@@ -17,6 +18,7 @@ extern pthread_mutex_t *minus_mutex;
 extern pthread_mutex_t *mul_mutex;
 extern pthread_mutex_t *div_mutex;
 extern pthread_mutex_t *sqrt_mutex;
+extern pthread_mutex_t *stdout_mutex;
 
 double op_plus(double a, double b){ return a + b; }
 double op_minus(double a, double b) { return a - b; }
@@ -26,7 +28,7 @@ double op_sqrt(double a, double b) { return (a >= 0) ? sqrt(a) : 0; } // b иг�
 
 void generic_process(const char *process_name, const char *filename, pthread_mutex_t *mutex, math_op_t operation)
 {
-    printf("[%s %d] started\n", process_name, getpid());
+    sync_printf("[%s %d] started\n", process_name, getpid());
 
     while (1) {
         bool has_job = false;
@@ -41,7 +43,6 @@ void generic_process(const char *process_name, const char *filename, pthread_mut
             if (fscanf(file, "%d %lf %lf %lf", &status_int, &num1, &num2, &res_unused) == 4) {
                 if ((TaskStatus)status_int == STATUS_READY) {
                     has_job = true;
-                    printf("[%s %d] got task: num1=%.2lf, num2=%.2lf\n", process_name, getpid(), num1, num2);
                 }
             }
             fclose(file);
@@ -56,6 +57,8 @@ void generic_process(const char *process_name, const char *filename, pthread_mut
 
         if (has_job) {
             const double res = operation(num1, num2);
+            // Синхронизированный вывод вне критической секции
+            sync_printf("[%s %d] got task: num1=%.2lf, num2=%.2lf\n", process_name, getpid(), num1, num2);
 
             // БЛОКИРУЕМ МЬЮТЕКС для записи в файл
             pthread_mutex_lock(mutex);
@@ -63,15 +66,18 @@ void generic_process(const char *process_name, const char *filename, pthread_mut
             if (file_out) {
                 fprintf(file_out, "%d %.17g %.17g %.17g\n", STATUS_DONE, num1, num2, res);
                 fclose(file_out);
-                printf("[%s %d] result ready: %.2f\n", process_name, getpid(), res);
+
             } else {
                 perror("fopen write");
             }
 
             // РАЗБЛОКИРУЕМ МЬЮТЕКС для того чтобы забрали результаты вычислений
             pthread_mutex_unlock(mutex);
+
+            // Синхронизированный вывод вне критической секции
+            sync_printf("[%s %d] result ready: %.2f\n", process_name, getpid(), res);
         } else {
-            usleep(10 * 1000); // 10 мс
+            usleep(1000); // 1 мс
         }
     }
 }

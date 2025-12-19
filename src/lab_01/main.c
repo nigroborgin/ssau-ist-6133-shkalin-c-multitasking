@@ -9,10 +9,12 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdarg.h>  // для va_list, va_start, va_end
 
 #include "lab_01/arithmetic_processes.h"
 #include "lab_01/file_paths.h"
 #include "lab_01/task_statuses.h"
+#include "lab_01/utils.h"
 
 
 pid_t plus_pid  = -1;
@@ -26,17 +28,31 @@ pthread_mutex_t *minus_mutex;
 pthread_mutex_t *mul_mutex;
 pthread_mutex_t *div_mutex;
 pthread_mutex_t *sqrt_mutex;
+pthread_mutex_t *stdout_mutex;
 
 
 const int TIMEOUT_PER_TASK = 5000;      // Время ожидания на каждую попытку (в микросекундах): 5000 мкс = 5 мс
 const int MAX_ATTEMPTS_PER_TASK = 1000; // Максимальное количество попыток
 // Общий максимальный таймаут на задачу: 1000 попыток * 5 мс = 5 секунд
 
+void sync_printf(const char* format, ...)
+{
+    va_list args; // список переменных аргументов из "..."
+    va_start(args, format);
+
+    pthread_mutex_lock(stdout_mutex);
+    vprintf(format, args);
+    fflush(stdout);
+    pthread_mutex_unlock(stdout_mutex);
+
+    va_end(args);
+}
+
 void init_shared_mutex(pthread_mutex_t **mutex_ptr)
 {
     // Выделяем память (под размер мьютекса), которая будет общей для всех процессов после fork
     // sizeof(pthread_mutex_t) — это всего 24-40 байт
-    //
+
     // PROT_READ | PROT_WRITE - разрешаем чтение и запись
     // MAP_SHARED - изменения видны другим процессам
     // MAP_ANONYMOUS - не используем файловый дескриптор (fd = -1)
@@ -71,6 +87,7 @@ void init_mutexes(void)
     init_shared_mutex(&mul_mutex);
     init_shared_mutex(&div_mutex);
     init_shared_mutex(&sqrt_mutex);
+    init_shared_mutex(&stdout_mutex);
 }
 
 void cleanup_mutex_memory(pthread_mutex_t **mutex_ptr)
@@ -86,6 +103,7 @@ void cleanup_mutexes(void)
     cleanup_mutex_memory(&mul_mutex);
     cleanup_mutex_memory(&div_mutex);
     cleanup_mutex_memory(&sqrt_mutex);
+    cleanup_mutex_memory(&stdout_mutex);
 }
 
 void create_processes(void)
@@ -178,6 +196,14 @@ double get_task_result(const char *filename, pthread_mutex_t *mutex)
             if (fscanf(file_res, "%d %lf %lf %lf", &status_int, &num1_readed, &num2_readed, &result) == 4) {
                 if ((TaskStatus)status_int == STATUS_DONE) {
                     fclose(file_res);
+
+                    // Сбросить файл в состояние IDLE, чтобы родительский поток
+                    FILE *clear = fopen(filename, "w");
+                    if (clear) {
+                        fprintf(clear, "%d 0 0 0\n", STATUS_IDLE);
+                        fclose(clear);
+                    }
+
                     // РАЗБЛОКИРУЕМ МЬЮТЕКС т.к. файл прочитан
                     pthread_mutex_unlock(mutex);
                     // выходим из цикла, т.к. результат получен
@@ -201,6 +227,7 @@ double get_task_result(const char *filename, pthread_mutex_t *mutex)
     return NAN;  // Возвращаем NaN при таймауте
 }
 
+
 int main(void)
 {
     init();
@@ -208,72 +235,92 @@ int main(void)
     double a, b, c;
     // Даем дочерним процессам время вывести сообщения о запуске, чтобы они не смешивались с сообщением ввода
     usleep(1000);
-    printf("\nКВАДРАТНОЕ УРАВНЕНИЕ:\n"
-           "Введите коэффициенты a, b, c: ");
+    sync_printf("\nКВАДРАТНОЕ УРАВНЕНИЕ:\n"
+                "Введите коэффициенты a, b, c: ");
     if (scanf("%lf %lf %lf", &a, &b, &c) != 3) {
         fprintf(stderr, "Ошибка ввода\n");
         goto error;
     }
 
-    printf("\n");
+    sync_printf("\n");
     // a = 1; b = -5; c = 6;
-
     // 1. Посчитать b^2 (через MUL_FILE)
     if (!create_task(MUL_FILE, mul_mutex, b, b)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "MULTI", b, b);
     const double b_squared = get_task_result(MUL_FILE, mul_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "MULTI", b_squared);
 
     // 2.1. Посчитать 4*a (через MUL_FILE)
     if (!create_task(MUL_FILE, mul_mutex, 4.0, a)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "MULTI", 4.0, a);
     const double a_4 = get_task_result(MUL_FILE, mul_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "MULTI", a_4);
 
     // 2.2. Посчитать 4a*c (через MUL_FILE)
     if (!create_task(MUL_FILE, mul_mutex, a_4, c)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "MULTI", a_4, c);
     const double a_c_4 = get_task_result(MUL_FILE, mul_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "MULTI", a_c_4);
 
     // 3. Посчитать D = b^2 - 4ac (через MINUS_FILE)
     if (!create_task(MINUS_FILE, minus_mutex, b_squared, a_c_4)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "MINUS", b_squared, a_c_4);
     const double d = get_task_result(MINUS_FILE, minus_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "MINUS", d);
 
     // 4. Если D < 0:
     if (d < 0) {
-        printf("Результат: Нет действительных корней");
+        sync_printf("Результат: Нет действительных корней");
         cleanup();
         return 0;
     }
 
     // 5. Извлечь sqrt(D) (через SQRT_FILE)
     if (!create_task(SQRT_FILE, sqrt_mutex, d, 0.0)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf\n", "MAIN", getpid(), "SQRT", d);
     const double sqrt_d = get_task_result(SQRT_FILE, sqrt_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "SQRT", sqrt_d);
 
     // 6-7. Посчитать x1, x2 = (-b ± sqrt(D)) / 2a
 
     // -b
     if (!create_task(MINUS_FILE, minus_mutex, 0, b)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "MINUS", 0.0, b);
     const double minus_b = get_task_result(MINUS_FILE, minus_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "MINUS", minus_b);
 
     // 2a
     if (!create_task(MUL_FILE, mul_mutex, a, 2)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "MULTI", a, 2.0);
     const double a_2 = get_task_result(MUL_FILE, mul_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "MULTI", a_2);
 
     // (-b + sqrt(D))
     if (!create_task(PLUS_FILE, plus_mutex, minus_b, sqrt_d)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "PLUS", minus_b, sqrt_d);
     const double minus_b_plus_sqrt_d = get_task_result(PLUS_FILE, plus_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "PLUS", minus_b_plus_sqrt_d);
 
     // (-b - sqrt(D))
     if (!create_task(MINUS_FILE, minus_mutex, minus_b, sqrt_d)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "MINUS", minus_b, sqrt_d);
     const double minus_b_minus_sqrt_d = get_task_result(MINUS_FILE, minus_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "MINUS", minus_b_minus_sqrt_d);
 
     // Посчитать x1 = (-b + sqrt(D)) / 2a
     if (!create_task(DIV_FILE, div_mutex, minus_b_plus_sqrt_d, a_2)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "DIV", minus_b_plus_sqrt_d, a_2);
     const double x1 = get_task_result(DIV_FILE, div_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "DIV", x1);
 
     // Посчитать x2 = (-b - sqrt(D)) / 2a
     if (!create_task(DIV_FILE, div_mutex, minus_b_minus_sqrt_d, a_2)) goto error;
+    sync_printf("[%s %d] create task: %s num1=%.2lf, num2=%.2lf\n", "MAIN", getpid(), "DIV", minus_b_minus_sqrt_d, a_2);
     const double x2 = get_task_result(DIV_FILE, div_mutex);
+    sync_printf("[%s %d] got result by %s: %.2lf\n\n", "MAIN", getpid(), "DIV", x2);
 
     // Результат
-    printf("\nРезультат: x1 = %.17g, x2 = %.17g\n", x1, x2);
-
+    sync_printf("\nРезультат: x1 = %.17g, x2 = %.17g\n", x1, x2);
 
     cleanup();
     return 0;
@@ -281,5 +328,4 @@ int main(void)
 error:
     cleanup();
     return 1;
-
 }

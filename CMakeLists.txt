@@ -18,7 +18,6 @@ add_executable(2_3_posix_threads_2 src/2_threads/posix_threads_2.c)
 add_executable(lab_1_multitasking
         src/lab_01/main.c
         src/lab_01/arithmetic_processes.c
-        include/lab_01/utils.h
 )
 
 add_executable(lab_2_xorg

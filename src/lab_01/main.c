@@ -27,8 +27,10 @@ pthread_mutex_t *mul_mutex;
 pthread_mutex_t *div_mutex;
 pthread_mutex_t *sqrt_mutex;
 
-const int TIMEOUT_PER_TASK = 5000; // подождать 5 мс
-const int MAX_ATTEMPTS_PER_TASK = 1000;// 10 секунд (2000 * 5мс)
+
+const int TIMEOUT_PER_TASK = 5000;      // Время ожидания на каждую попытку (в микросекундах): 5000 мкс = 5 мс
+const int MAX_ATTEMPTS_PER_TASK = 1000; // Максимальное количество попыток
+// Общий максимальный таймаут на задачу: 1000 попыток * 5 мс = 5 секунд
 
 void init_shared_mutex(pthread_mutex_t **mutex_ptr)
 {
@@ -204,97 +206,69 @@ int main(void)
     init();
 
     double a, b, c;
+    // Даем дочерним процессам время вывести сообщения о запуске, чтобы они не смешивались с сообщением ввода
     usleep(1000);
     printf("\nКВАДРАТНОЕ УРАВНЕНИЕ:\n"
-           "Введите коэффициенты a, b, c (или Ctrl+D для выхода): ");
-    scanf("%lf %lf %lf", &a, &b, &c);
+           "Введите коэффициенты a, b, c: ");
+    if (scanf("%lf %lf %lf", &a, &b, &c) != 3) {
+        fprintf(stderr, "Ошибка ввода\n");
+        goto error;
+    }
+
     printf("\n");
     // a = 1; b = -5; c = 6;
 
     // 1. Посчитать b^2 (через MUL_FILE)
-    if (!create_task(MUL_FILE, mul_mutex, b, b)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(MUL_FILE, mul_mutex, b, b)) goto error;
     const double b_squared = get_task_result(MUL_FILE, mul_mutex);
 
     // 2.1. Посчитать 4*a (через MUL_FILE)
-    if (!create_task(MUL_FILE, mul_mutex, 4.0, a)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(MUL_FILE, mul_mutex, 4.0, a)) goto error;
     const double a_4 = get_task_result(MUL_FILE, mul_mutex);
 
-    // 2.2. Посчитать 4*a*c (через MUL_FILE)
-    if (!create_task(MUL_FILE, mul_mutex, a_4, c)) {
-        cleanup();
-        return 1;
-    }
+    // 2.2. Посчитать 4a*c (через MUL_FILE)
+    if (!create_task(MUL_FILE, mul_mutex, a_4, c)) goto error;
     const double a_c_4 = get_task_result(MUL_FILE, mul_mutex);
 
     // 3. Посчитать D = b^2 - 4ac (через MINUS_FILE)
-    if (!create_task(MINUS_FILE, minus_mutex, b_squared, a_c_4)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(MINUS_FILE, minus_mutex, b_squared, a_c_4)) goto error;
     const double d = get_task_result(MINUS_FILE, minus_mutex);
 
     // 4. Если D < 0:
     if (d < 0) {
         printf("Результат: Нет действительных корней");
+        cleanup();
         return 0;
     }
 
     // 5. Извлечь sqrt(D) (через SQRT_FILE)
-    if (!create_task(SQRT_FILE, sqrt_mutex, d, 0.0)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(SQRT_FILE, sqrt_mutex, d, 0.0)) goto error;
     const double sqrt_d = get_task_result(SQRT_FILE, sqrt_mutex);
 
-    // 6.
-    // 7. Посчитать x2 = (-b - sqrt(D)) / 2a
+    // 6-7. Посчитать x1, x2 = (-b ± sqrt(D)) / 2a
 
     // -b
-    if (!create_task(MINUS_FILE, minus_mutex, 0, b)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(MINUS_FILE, minus_mutex, 0, b)) goto error;
     const double minus_b = get_task_result(MINUS_FILE, minus_mutex);
 
     // 2a
-    if (!create_task(MUL_FILE, mul_mutex, a, 2)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(MUL_FILE, mul_mutex, a, 2)) goto error;
     const double a_2 = get_task_result(MUL_FILE, mul_mutex);
 
     // (-b + sqrt(D))
-    if (!create_task(PLUS_FILE, plus_mutex, minus_b, sqrt_d)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(PLUS_FILE, plus_mutex, minus_b, sqrt_d)) goto error;
     const double minus_b_plus_sqrt_d = get_task_result(PLUS_FILE, plus_mutex);
 
     // (-b - sqrt(D))
-    if (!create_task(MINUS_FILE, minus_mutex, minus_b, sqrt_d)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(MINUS_FILE, minus_mutex, minus_b, sqrt_d)) goto error;
     const double minus_b_minus_sqrt_d = get_task_result(MINUS_FILE, minus_mutex);
 
     // Посчитать x1 = (-b + sqrt(D)) / 2a
-    if (!create_task(DIV_FILE, div_mutex, minus_b_plus_sqrt_d, a_2)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(DIV_FILE, div_mutex, minus_b_plus_sqrt_d, a_2)) goto error;
     const double x1 = get_task_result(DIV_FILE, div_mutex);
 
     // Посчитать x2 = (-b - sqrt(D)) / 2a
-    if (!create_task(DIV_FILE, div_mutex, minus_b_minus_sqrt_d, a_2)) {
-        cleanup();
-        return 1;
-    }
+    if (!create_task(DIV_FILE, div_mutex, minus_b_minus_sqrt_d, a_2)) goto error;
     const double x2 = get_task_result(DIV_FILE, div_mutex);
 
     // Результат
@@ -303,4 +277,9 @@ int main(void)
 
     cleanup();
     return 0;
+
+error:
+    cleanup();
+    return 1;
+
 }

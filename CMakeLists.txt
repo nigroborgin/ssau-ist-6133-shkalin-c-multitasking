@@ -5,24 +5,35 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 
-# INCLUDE
-include_directories(include)
-
-# samples
-add_executable(1_processes src/1_processes/main.c src/1_processes/hello.c)
-add_executable(2_1_system_v_threads src/2_threads/system_v_threads.c)
-add_executable(2_2_posix_threads_1 src/2_threads/posix_threads_1.c)
-add_executable(2_3_posix_threads_2 src/2_threads/posix_threads_2.c)
-
-# labs
+# Lab 1: multitasking
 add_executable(lab_1_multitasking
         src/lab_01/main.c
         src/lab_01/arithmetic_processes.c
 )
 
+target_include_directories(lab_1_multitasking
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/include/lab_01
+)
+
+target_link_libraries(lab_1_multitasking
+        PRIVATE
+        pthread   # подключить библиотеку для POSIX-потоков
+        m         # подключить математическую библиотеку libm
+)
+
+
+# Lab 2: Xorg rocket
 add_executable(lab_2_xorg
         src/lab_02/rocket.c
 )
 
-# LINK LIBRARIES
-target_link_libraries(lab_1_multitasking PRIVATE pthread m)
+target_include_directories(lab_2_xorg
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/include/lab_02
+)
+
+target_link_libraries(lab_2_xorg
+        PRIVATE
+        X11
+)

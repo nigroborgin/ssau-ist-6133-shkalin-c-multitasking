@@ -11,10 +11,10 @@
 #include <string.h>
 #include <stdarg.h>  // для va_list, va_start, va_end
 
-#include "lab_01/arithmetic_processes.h"
-#include "lab_01/file_paths.h"
-#include "lab_01/task_statuses.h"
-#include "lab_01/utils.h"
+#include "arithmetic_processes.h"
+#include "file_paths.h"
+#include "task_statuses.h"
+#include "utils.h"
 
 
 pid_t plus_pid  = -1;

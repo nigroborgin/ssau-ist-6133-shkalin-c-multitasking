@@ -5,10 +5,10 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-#include "lab_01/arithmetic_processes.h"
-#include "lab_01/file_paths.h"
-#include "lab_01/task_statuses.h"
-#include "lab_01/utils.h"
+#include "arithmetic_processes.h"
+#include "file_paths.h"
+#include "task_statuses.h"
+#include "utils.h"
 
 
 typedef double (*math_op_t)(double a, double b);

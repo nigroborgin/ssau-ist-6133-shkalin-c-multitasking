@@ -8,3 +8,5 @@ cmake-build-*/
 
 # Compiled files
 out/*
+output/*
+build/*

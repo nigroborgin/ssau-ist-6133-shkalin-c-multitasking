@@ -35,5 +35,5 @@ target_include_directories(lab_2_xorg
 
 target_link_libraries(lab_2_xorg
         PRIVATE
-        X11
+        X11       # подключить библиотеку Xorg
 )
